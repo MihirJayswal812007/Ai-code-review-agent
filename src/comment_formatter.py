@@ -36,6 +36,9 @@ def format_summary_comment(review: PRReview) -> str:
             status = "✅" if issue_count == 0 else f"⚠️ {issue_count} issue(s)"
             lines.append(f"- `{fr.file_path}` — {status}")
 
+    # Add link to view full review on GitHub
+    pr_url = f"https://github.com/{review.repo_full_name}/pull/{review.pr_number}"
+    lines.append(f"\n[📋 View detailed review on GitHub]({pr_url}/files)")
     lines.append("\n---\n*Powered by AI Code Review Agent* 🤖")
     return "\n".join(lines)
 

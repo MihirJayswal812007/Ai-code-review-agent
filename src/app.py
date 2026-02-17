@@ -15,6 +15,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 github_client: GitHubClient | None = None
+recent_reviews: list[dict] = []  # Store recent reviews in memory (max 50)
 
 
 @asynccontextmanager
@@ -85,6 +86,7 @@ async def root():
         
         <h2>API Documentation</h2>
         <div class="endpoint">
+            <p>📊 <a href="/dashboard">Review Dashboard</a> - View recent reviews in real-time</p>
             <p>📚 <a href="/docs">Interactive API Docs (Swagger UI)</a></p>
             <p>📖 <a href="/redoc">API Reference (ReDoc)</a></p>
         </div>
@@ -108,6 +110,100 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy", "service": "ai-code-review-agent"}
+
+
+@app.get("/dashboard")
+async def dashboard():
+    """Web dashboard showing recent reviews."""
+    from fastapi.responses import HTMLResponse
+    
+    # Generate table rows
+    rows = ""
+    if not recent_reviews:
+        rows = "<tr><td colspan='6' style='text-align: center; color: #8b949e;'>No reviews yet. Create a PR to see reviews here!</td></tr>"
+    else:
+        for review in recent_reviews:
+            score_color = "#238636" if review["score"] >= 7 else "#d29922" if review["score"] >= 4 else "#da3633"
+            rows += f"""
+            <tr>
+                <td>{review["timestamp"].split("T")[1].split(".")[0]}</td>
+                <td><a href="{review["pr_url"]}" target="_blank">{review["repo"]}#{review["pr_number"]}</a></td>
+                <td style="color: {score_color}; font-weight: bold;">{review["score"]}/10</td>
+                <td>{review["total_issues"]}</td>
+                <td style="color: #da3633;">{review["critical"]}</td>
+                <td style="color: #d29922;">{review["warnings"]}</td>
+            </tr>
+            """
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>AI Code Review Dashboard</title>
+        <meta http-equiv="refresh" content="30">
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+                   max-width: 1200px; margin: 30px auto; padding: 20px; background: #0d1117; color: #c9d1d9; }}
+            h1 {{ color: #58a6ff; }}
+            a {{ color: #58a6ff; text-decoration: none; }}
+            a:hover {{ text-decoration: underline; }}
+            table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+            th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid #30363d; }}
+            th {{ background: #161b22; color: #8b949e; font-weight: 600; }}
+            tr:hover {{ background: #161b22; }}
+            .stats {{ display: flex; gap: 20px; margin: 20px 0; }}
+            .stat-card {{ background: #161b22; border: 1px solid #30363d; border-radius: 6px; 
+                         padding: 15px; flex: 1; }}
+            .stat-value {{ font-size: 32px; font-weight: bold; color: #58a6ff; }}
+            .stat-label {{ color: #8b949e; margin-top: 5px; }}
+        </style>
+    </head>
+    <body>
+       <h1>🤖 AI Code Review Dashboard</h1>
+        <p>Real-time view of recent code reviews • Auto-refreshes every 30 seconds</p>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value">{len(recent_reviews)}</div>
+                <div class="stat-label">Total Reviews</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{sum(r["total_issues"] for r in recent_reviews) if recent_reviews else 0}</div>
+                <div class="stat-label">Issues Found</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{round(sum(r["score"] for r in recent_reviews) / len(recent_reviews), 1) if recent_reviews else 0}</div>
+                <div class="stat-label">Average Score</div>
+            </div>
+        </div>
+        
+        <h2>Recent Reviews</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Pull Request</th>
+                    <th>Score</th>
+                    <th>Total Issues</th>
+                    <th>Critical</th>
+                    <th>Warnings</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows}
+            </tbody>
+        </table>
+        
+        <p style="margin-top: 40px; color: #8b949e; font-size: 14px;">
+            <a href="/">← Back to home</a> | 
+            <a href="/docs">API Docs</a> | 
+            <a href="/health">Health Check</a>
+        </p>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
+
 
 
 @app.post("/webhook")
@@ -179,6 +275,23 @@ async def handle_webhook(request: Request):
             f"Review posted for PR #{pr_number}: "
             f"{review.total_issues} issues, score {review.overall_score}/10"
         )
+        
+        # Store review in memory for dashboard
+        global recent_reviews
+        from datetime import datetime
+        recent_reviews.insert(0, {
+            "timestamp": datetime.now().isoformat(),
+            "repo": review.repo_full_name,
+            "pr_number": pr_number,
+            "pr_url": f"https://github.com/{review.repo_full_name}/pull/{pr_number}",
+            "score": review.overall_score,
+            "total_issues": review.total_issues,
+            "critical": review.critical_count,
+            "warnings": review.warning_count,
+        })
+        # Keep only last 50 reviews
+        recent_reviews = recent_reviews[:50]
+        
         return {
             "status": "reviewed",
             "pr": pr_number,
