@@ -1,0 +1,24 @@
+diff --git a/calculator.py b/calculator.py
+index 1234567..abcdefg 100644
+--- a/calculator.py
++++ b/calculator.py
+@@ -1,10 +1,15 @@
+ def divide(a, b):
+-    return a / b
++    if b == 0:
++        raise ValueError("Cannot divide by zero")
++    return a / b
+ 
+ def calculate_average(numbers):
++    if not numbers:
++        return 0
+     total = sum(numbers)
+-    return total / len(numbers)
++    count = len(numbers)
++    return total / count
+ 
+ class DataProcessor:
+     def process_data(self, data):
+-        result = data.split(',')
++        result = data.strip().split(',')
+         return [x.upper() for x in result]

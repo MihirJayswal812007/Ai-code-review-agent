@@ -1,0 +1,29 @@
+name: 'AI Code Review'
+description: 'AI-powered code review that detects bugs, security issues, and suggests improvements'
+author: 'Your Name'
+
+inputs:
+  groq_api_key:
+    description: 'Groq API key for LLM access'
+    required: true
+  github_token:
+    description: 'GitHub token for API access'
+    required: true
+    default: ${{ github.token }}
+  model:
+    description: 'LLM model to use'
+    required: false
+    default: 'llama-3.3-70b-versatile'
+  max_files:
+    description: 'Maximum files to review per PR'
+    required: false
+    default: '20'
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+  env:
+    GROQ_API_KEY: ${{ inputs.groq_api_key }}
+    GITHUB_TOKEN: ${{ inputs.github_token }}
+    LLM_MODEL: ${{ inputs.model }}
+    MAX_FILES_PER_REVIEW: ${{ inputs.max_files }}
