@@ -112,7 +112,7 @@ jobs:
 | `GITHUB_WEBHOOK_SECRET` | ⚠️ Rec | - | Output of `openssl rand -hex 20` for signature verification |
 | `LLM_MODEL` | No | `llama-3.3-70b-versatile` | Groq model to use |
 | `MAX_FILES_PER_REVIEW` | No | `20` | Max files to review per PR |
-| `REVIEW_LANGUAGES` | No | `python,javascript...` | Supported languages |
+| `REVIEW_LANGUAGES` | No | `python,javascript,typescript,java,go,rust,ruby,cpp,c,csharp` | Supported languages |
 
 ---
 
