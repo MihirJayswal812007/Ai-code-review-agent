@@ -1,8 +1,6 @@
 """Tests for diff_parser module."""
 
-import pytest
 from src.diff_parser import parse_diff, detect_language, _build_chunk
-from src.models import DiffChunk
 
 
 def test_detect_language():

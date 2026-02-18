@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from groq import Groq
 from src.config import get_settings
 from src.models import DiffChunk, ReviewIssue, FileReview, PRReview, Severity
@@ -50,57 +51,82 @@ class LLMReviewer:
         self.client = Groq(api_key=settings.groq_api_key)
         self.model = settings.llm_model
 
-    def review_chunk(self, chunk: DiffChunk) -> FileReview:
-        """Review a single diff chunk and return structured feedback."""
+    def review_chunk(self, chunk: DiffChunk, max_retries: int = 3) -> FileReview:
+        """Review a single diff chunk and return structured feedback.
+
+        Retries up to max_retries times with exponential backoff on failure.
+        """
         user_prompt = (
             f"Review this {chunk.language} code diff from `{chunk.file_path}`:\n\n"
             f"```diff\n{chunk.content}\n```\n\n"
             f"The diff starts at line {chunk.new_start} in the new file."
         )
 
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.1,
-                max_tokens=2048,
-                response_format={"type": "json_object"},
-            )
-
-            result = json.loads(response.choices[0].message.content)
-            issues = [
-                ReviewIssue(
-                    file_path=chunk.file_path,
-                    line_start=issue.get("line_start", chunk.new_start),
-                    line_end=issue.get("line_end", chunk.new_start),
-                    severity=Severity(issue.get("severity", "info")),
-                    category=issue.get("category", "style"),
-                    title=issue.get("title", "Issue found"),
-                    description=issue.get("description", ""),
-                    suggestion=issue.get("suggestion"),
-                    confidence=0.85,
+        last_error = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=0.1,
+                    max_tokens=2048,
+                    response_format={"type": "json_object"},
                 )
-                for issue in result.get("issues", [])
-            ]
 
-            return FileReview(
-                file_path=chunk.file_path,
-                language=chunk.language,
-                issues=issues,
-                summary=result.get("summary", ""),
-            )
+                raw_content = response.choices[0].message.content
+                result = json.loads(raw_content)
 
-        except Exception as e:
-            logger.error(f"LLM review failed for {chunk.file_path}: {e}")
-            return FileReview(
-                file_path=chunk.file_path,
-                language=chunk.language,
-                issues=[],
-                summary=f"Review failed: {str(e)}",
-            )
+                issues = [
+                    ReviewIssue(
+                        file_path=chunk.file_path,
+                        line_start=issue.get("line_start", chunk.new_start),
+                        line_end=issue.get("line_end", chunk.new_start),
+                        severity=Severity(issue.get("severity", "info")),
+                        category=issue.get("category", "style"),
+                        title=issue.get("title", "Issue found"),
+                        description=issue.get("description", ""),
+                        suggestion=issue.get("suggestion"),
+                        confidence=0.85,
+                    )
+                    for issue in result.get("issues", [])
+                ]
+
+                return FileReview(
+                    file_path=chunk.file_path,
+                    language=chunk.language,
+                    issues=issues,
+                    summary=result.get("summary", ""),
+                )
+
+            except json.JSONDecodeError as e:
+                last_error = e
+                logger.warning(
+                    f"Malformed JSON from LLM for {chunk.file_path} "
+                    f"(attempt {attempt}/{max_retries}): {e}"
+                )
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    f"LLM review failed for {chunk.file_path} "
+                    f"(attempt {attempt}/{max_retries}): {e}"
+                )
+
+            if attempt < max_retries:
+                backoff = 2 ** (attempt - 1)  # 1s, 2s
+                logger.info(f"Retrying in {backoff}s...")
+                time.sleep(backoff)
+
+        # All retries exhausted
+        logger.error(f"LLM review failed after {max_retries} attempts for {chunk.file_path}: {last_error}")
+        return FileReview(
+            file_path=chunk.file_path,
+            language=chunk.language,
+            issues=[],
+            summary=f"Review failed after {max_retries} attempts: {last_error}",
+        )
 
     def review_pr(self, chunks: list[DiffChunk]) -> PRReview:
         """Review all chunks in a PR."""

@@ -1,6 +1,5 @@
 """Tests for comment_formatter module."""
 
-import pytest
 from src.comment_formatter import (
     format_summary_comment,
     format_inline_comments,

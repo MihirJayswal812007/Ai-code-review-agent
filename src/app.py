@@ -3,26 +3,39 @@
 import hashlib
 import hmac
 import logging
+from collections import deque
 from contextlib import asynccontextmanager
+from datetime import datetime
+from time import time as monotonic_time
+
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import HTMLResponse
+
 from src.config import get_settings
 from src.github_client import GitHubClient
 from src.diff_parser import parse_diff
 from src.llm_reviewer import LLMReviewer
 from src.comment_formatter import format_summary_comment, format_inline_comments
+from src.db import ReviewDatabase
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 github_client: GitHubClient | None = None
-recent_reviews: list[dict] = []  # Store recent reviews in memory (max 50)
+review_db: ReviewDatabase | None = None
+
+# Simple rate limiter: timestamps of recent reviews
+_review_timestamps: deque[float] = deque(maxlen=10)
+MAX_REVIEWS_PER_MINUTE = 10
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global github_client
+    global github_client, review_db
     github_client = GitHubClient()
+    review_db = ReviewDatabase()
     logger.info("AI Code Review Agent started ✅")
+    logger.info(f"Dashboard DB: {review_db.db_path}")
     yield
     if github_client:
         await github_client.close()
@@ -31,8 +44,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AI Code Review Agent",
     description="Automated PR code review powered by LLMs",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
+    redoc_url="/redoc",
+    docs_url="/docs",
 )
 
 
@@ -44,10 +59,18 @@ def verify_signature(payload: bytes, signature: str, secret: str) -> bool:
     return hmac.compare_digest(expected, signature)
 
 
+def _is_rate_limited() -> bool:
+    """Check if we've exceeded the review rate limit."""
+    now = monotonic_time()
+    # Remove timestamps older than 60 seconds
+    while _review_timestamps and now - _review_timestamps[0] > 60:
+        _review_timestamps.popleft()
+    return len(_review_timestamps) >= MAX_REVIEWS_PER_MINUTE
+
+
 @app.get("/")
 async def root():
     """Welcome page with links to all endpoints."""
-    from fastapi.responses import HTMLResponse
     html = """
     <!DOCTYPE html>
     <html>
@@ -99,7 +122,7 @@ async def root():
         </ol>
         
         <p style="margin-top: 40px; color: #8b949e; font-size: 14px;">
-            Powered by FastAPI • Groq LLM • Tree-sitter
+            Powered by FastAPI • Groq LLM
         </p>
     </body>
     </html>
@@ -114,27 +137,31 @@ async def health():
 
 @app.get("/dashboard")
 async def dashboard():
-    """Web dashboard showing recent reviews."""
-    from fastapi.responses import HTMLResponse
-    
+    """Web dashboard showing recent reviews (persisted in SQLite)."""
+    reviews = review_db.get_recent_reviews(limit=50)
+    stats = review_db.get_stats()
+
     # Generate table rows
     rows = ""
-    if not recent_reviews:
+    if not reviews:
         rows = "<tr><td colspan='6' style='text-align: center; color: #8b949e;'>No reviews yet. Create a PR to see reviews here!</td></tr>"
     else:
-        for review in recent_reviews:
-            score_color = "#238636" if review["score"] >= 7 else "#d29922" if review["score"] >= 4 else "#da3633"
+        for review in reviews:
+            score = review["score"]
+            score_color = "#238636" if score >= 7 else "#d29922" if score >= 4 else "#da3633"
+            ts = review["timestamp"]
+            time_display = ts.split("T")[1].split(".")[0] if "T" in ts else ts
             rows += f"""
             <tr>
-                <td>{review["timestamp"].split("T")[1].split(".")[0]}</td>
-                <td><a href="{review["pr_url"]}" target="_blank">{review["repo"]}#{review["pr_number"]}</a></td>
-                <td style="color: {score_color}; font-weight: bold;">{review["score"]}/10</td>
-                <td>{review["total_issues"]}</td>
-                <td style="color: #da3633;">{review["critical"]}</td>
-                <td style="color: #d29922;">{review["warnings"]}</td>
+                <td>{time_display}</td>
+                <td><a href="{review['pr_url']}" target="_blank">{review['repo']}#{review['pr_number']}</a></td>
+                <td style="color: {score_color}; font-weight: bold;">{score}/10</td>
+                <td>{review['total_issues']}</td>
+                <td style="color: #da3633;">{review['critical']}</td>
+                <td style="color: #d29922;">{review['warnings']}</td>
             </tr>
             """
-    
+
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -164,15 +191,15 @@ async def dashboard():
         
         <div class="stats">
             <div class="stat-card">
-                <div class="stat-value">{len(recent_reviews)}</div>
+                <div class="stat-value">{stats['total_reviews']}</div>
                 <div class="stat-label">Total Reviews</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value">{sum(r["total_issues"] for r in recent_reviews) if recent_reviews else 0}</div>
+                <div class="stat-value">{stats['total_issues']}</div>
                 <div class="stat-label">Issues Found</div>
             </div>
             <div class="stat-card">
-                <div class="stat-value">{round(sum(r["score"] for r in recent_reviews) / len(recent_reviews), 1) if recent_reviews else 0}</div>
+                <div class="stat-value">{stats['avg_score']}</div>
                 <div class="stat-label">Average Score</div>
             </div>
         </div>
@@ -205,18 +232,22 @@ async def dashboard():
     return HTMLResponse(content=html)
 
 
-
 @app.post("/webhook")
 async def handle_webhook(request: Request):
     """Handle incoming GitHub webhook events."""
     settings = get_settings()
 
-    # Verify signature if webhook secret is configured
+    # Verify webhook signature
+    body = await request.body()
     if settings.github_webhook_secret:
-        body = await request.body()
         signature = request.headers.get("X-Hub-Signature-256", "")
         if not verify_signature(body, signature, settings.github_webhook_secret):
             raise HTTPException(status_code=401, detail="Invalid signature")
+    else:
+        logger.warning(
+            "⚠️ GITHUB_WEBHOOK_SECRET not set — skipping signature verification. "
+            "Set it in .env for production use."
+        )
 
     payload = await request.json()
     event = request.headers.get("X-GitHub-Event", "")
@@ -228,16 +259,28 @@ async def handle_webhook(request: Request):
     if action not in ("opened", "synchronize", "reopened"):
         return {"status": "ignored", "reason": f"Action: {action}"}
 
+    # Rate limiting
+    if _is_rate_limited():
+        logger.warning("Rate limit exceeded, skipping review")
+        return {"status": "rate_limited", "reason": "Too many reviews per minute"}
+    _review_timestamps.append(monotonic_time())
+
     # Extract PR info
     pr = payload["pull_request"]
     repo = payload["repository"]
     pr_number = pr["number"]
+    commit_sha = pr.get("head", {}).get("sha", "")
     full_name = repo["full_name"]
     if "/" not in full_name:
         raise HTTPException(status_code=400, detail=f"Invalid repository name: {full_name}")
     owner, repo_name = full_name.split("/", 1)
 
-    logger.info(f"Reviewing PR #{pr_number} on {owner}/{repo_name}")
+    # Deduplication: skip if this exact commit was already reviewed
+    if review_db and review_db.has_reviewed_commit(full_name, pr_number, commit_sha):
+        logger.info(f"Skipping PR #{pr_number} — commit {commit_sha[:8]} already reviewed")
+        return {"status": "already_reviewed", "commit": commit_sha[:8]}
+
+    logger.info(f"Reviewing PR #{pr_number} on {owner}/{repo_name} (commit {commit_sha[:8]})")
 
     try:
         # 1. Fetch the diff
@@ -262,11 +305,11 @@ async def handle_webhook(request: Request):
         inline_comments = format_inline_comments(review)
 
         if inline_comments:
-            event_type = (
+            review_event = (
                 "REQUEST_CHANGES" if review.critical_count > 0 else "COMMENT"
             )
             await github_client.create_review(
-                owner, repo_name, pr_number, summary, inline_comments, event_type
+                owner, repo_name, pr_number, summary, inline_comments, review_event
             )
         else:
             await github_client.post_comment(owner, repo_name, pr_number, summary)
@@ -275,23 +318,21 @@ async def handle_webhook(request: Request):
             f"Review posted for PR #{pr_number}: "
             f"{review.total_issues} issues, score {review.overall_score}/10"
         )
-        
-        # Store review in memory for dashboard
-        global recent_reviews
-        from datetime import datetime
-        recent_reviews.insert(0, {
-            "timestamp": datetime.now().isoformat(),
-            "repo": review.repo_full_name,
-            "pr_number": pr_number,
-            "pr_url": f"https://github.com/{review.repo_full_name}/pull/{pr_number}",
-            "score": review.overall_score,
-            "total_issues": review.total_issues,
-            "critical": review.critical_count,
-            "warnings": review.warning_count,
-        })
-        # Keep only last 50 reviews
-        recent_reviews = recent_reviews[:50]
-        
+
+        # 5. Persist review to SQLite
+        if review_db:
+            review_db.save_review(
+                timestamp=datetime.now().isoformat(),
+                repo=review.repo_full_name,
+                pr_number=pr_number,
+                pr_url=f"https://github.com/{review.repo_full_name}/pull/{pr_number}",
+                score=review.overall_score,
+                total_issues=review.total_issues,
+                critical=review.critical_count,
+                warnings=review.warning_count,
+                commit_sha=commit_sha,
+            )
+
         return {
             "status": "reviewed",
             "pr": pr_number,

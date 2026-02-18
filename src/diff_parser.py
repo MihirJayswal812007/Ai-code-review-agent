@@ -126,9 +126,9 @@ def _build_chunk(
         return None
 
     content = "\n".join(lines)
-    added = [l[1:] for l in lines if l.startswith("+") and not l.startswith("+++")]
-    removed = [l[1:] for l in lines if l.startswith("-") and not l.startswith("---")]
-    context = [l[1:] for l in lines if l.startswith(" ")]
+    added = [ln[1:] for ln in lines if ln.startswith("+") and not ln.startswith("+++")]
+    removed = [ln[1:] for ln in lines if ln.startswith("-") and not ln.startswith("---")]
+    context = [ln[1:] for ln in lines if ln.startswith(" ")]
 
     return DiffChunk(
         file_path=file_path,

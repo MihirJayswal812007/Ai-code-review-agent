@@ -10,3 +10,6 @@ venv/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+data/
+ruff_errors.txt
+test_output.txt

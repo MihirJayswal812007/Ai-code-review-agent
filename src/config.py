@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     max_files_per_review: int = Field(20, env="MAX_FILES_PER_REVIEW")
     max_diff_lines: int = Field(500, env="MAX_DIFF_LINES")
     review_languages: str = Field(
-        "python,javascript,typescript,java",
+        "python,javascript,typescript,java,go,rust,ruby,cpp,c,csharp",
         env="REVIEW_LANGUAGES"
     )
 

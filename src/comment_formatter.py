@@ -17,8 +17,8 @@ def format_summary_comment(review: PRReview) -> str:
     lines = [
         "## 🤖 AI Code Review Summary\n",
         f"**Quality Score**: {review.overall_score}/10 {score_bar}\n",
-        f"| Metric | Count |",
-        f"|--------|-------|",
+        "| Metric | Count |",
+        "|--------|-------|",
         f"| Total Issues | {review.total_issues} |",
         f"| 🔴 Critical | {review.critical_count} |",
         f"| 🟡 Warnings | {review.warning_count} |",
