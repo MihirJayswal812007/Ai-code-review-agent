@@ -2,7 +2,7 @@
 
 > **Automated PR code review powered by LLMs** — Detect bugs, security issues, and code quality problems automatically.
 
-![CI](https://github.com/MihirJayswal812007/Ai-code-review-agent/actions/workflows/ci.yml/badge.svg)
+[![CI](https://github.com/MihirJayswal812007/Ai-code-review-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/MihirJayswal812007/Ai-code-review-agent/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
@@ -19,7 +19,8 @@ View recent reviews, quality scores, and issues in real-time. Data is persisted 
 ### 💬 Intelligent PR Comments
 The agent posts inline comments with code suggestions and explanations.
 
-![Inline Comment Example](docs/images/inline-comment-demo.png)
+![Inline Comment Example 1](docs/images/inline-comment-demo.png)
+![Inline Comment Example 2](docs/images/inline-comment-demo2.png)
 
 ---
 
