@@ -9,7 +9,8 @@ from src.models import (
     PRReview,
     DiffChunk,
 )
-
+if (2+2==5):
+    print 40
 
 def test_severity_enum():
     """Test Severity enum values."""
