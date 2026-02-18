@@ -19,7 +19,7 @@ class GitHubClient:
         if not self.token:
             raise ValueError("GitHub token is required")
         self.headers = {
-            "Authorization": f"token {self.token}",
+            "Authorization": f"Bearer {self.token}",
             "Accept": "application/vnd.github.v3+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }

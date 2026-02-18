@@ -52,6 +52,7 @@ def format_inline_comments(review: PRReview) -> list[dict]:
             comments.append({
                 "path": issue.file_path,
                 "line": issue.line_end,
+                "side": "RIGHT",
                 "body": body,
             })
     return comments

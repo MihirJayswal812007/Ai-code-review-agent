@@ -308,9 +308,15 @@ async def handle_webhook(request: Request):
             review_event = (
                 "REQUEST_CHANGES" if review.critical_count > 0 else "COMMENT"
             )
-            await github_client.create_review(
-                owner, repo_name, pr_number, summary, inline_comments, review_event
-            )
+            try:
+                await github_client.create_review(
+                    owner, repo_name, pr_number, summary, inline_comments, review_event
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Inline review failed ({e}), falling back to plain comment"
+                )
+                await github_client.post_comment(owner, repo_name, pr_number, summary)
         else:
             await github_client.post_comment(owner, repo_name, pr_number, summary)
 

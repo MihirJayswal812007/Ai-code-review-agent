@@ -122,7 +122,7 @@ flowchart LR
     A[PR Opened] --> B[GitHub Webhook]
     B --> C[FastAPI Server]
     C --> D[Fetch Diff & Parse]
-    D --> E[LLM Review (Groq)]
+    D --> E["LLM Review (Groq)"]
     E --> F[Persist to SQLite]
     F --> G[Format & Post Comments]
 ```
